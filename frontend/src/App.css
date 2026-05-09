@@ -1,0 +1,109 @@
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.muted {
+  color: #666;
+}
+
+.panel {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+  background: #fff;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.field.small {
+  max-width: 160px;
+  margin-bottom: 0;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+button {
+  padding: 8px 12px;
+  border: 1px solid #bbb;
+  border-radius: 6px;
+  background: #f7f7f7;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 920px;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid #eee;
+  padding: 8px;
+  vertical-align: top;
+}
+
+td select {
+  width: 100%;
+  min-width: 170px;
+}
+
+td progress {
+  width: 100%;
+  max-width: 220px;
+}
+
+.tableWrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.fileCell {
+  min-width: 260px;
+  word-break: break-word;
+}
+
+.error {
+  color: #b00020;
+}
+
+.dropHint {
+  border: 1px dashed #bbb;
+  border-radius: 6px;
+  background: #fafafa;
+  padding: 10px;
+  margin-bottom: 12px;
+  color: #555;
+}
