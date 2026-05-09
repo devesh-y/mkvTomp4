@@ -49,6 +49,21 @@ Output goes to: `<input-folder>/output/*.mp4`.
 - Audio is encoded to AAC (`192k`) for broad MP4 compatibility.
 - Burn step supports text subtitle codecs only (`subrip`, `ass`, `ssa`, `mov_text`).
 - Browser cannot reliably read full local folder path from drag/drop due to sandbox rules, so path paste is the reliable method.
+- Video encode now supports GPU acceleration when available. Backend tries GPU encoder auto-detection first (`h264_videotoolbox`, `h264_nvenc`, `h264_qsv`, `h264_amf`) and falls back to CPU (`libx264`) automatically.
+
+## Encoder Mode
+
+Set `VIDEO_ENCODER_MODE` for backend:
+
+- `auto` (default): use GPU encoder if detected, otherwise CPU
+- `gpu`: require GPU encoder (backend exits if none found)
+- `cpu`: force CPU encoding (`libx264`)
+
+Example:
+
+```bash
+VIDEO_ENCODER_MODE=cpu npm run dev
+```
 
 ## Example ffmpeg shape
 

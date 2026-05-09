@@ -7,6 +7,7 @@ import { z } from "zod";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const APP_ORIGIN = process.env.APP_ORIGIN ?? "http://localhost:5173";
+const VIDEO_ENCODER_MODE = (process.env.VIDEO_ENCODER_MODE ?? "auto").toLowerCase();
 
 const SUPPORTED_SUBTITLE_CODECS = new Set(["subrip", "ass", "ssa", "mov_text"]);
 
@@ -57,6 +58,12 @@ type ConversionRun = {
   isDone: boolean;
 };
 
+type VideoEncoderPlan = {
+  name: string;
+  mode: "cpu" | "gpu";
+  args: string[];
+};
+
 const scanFolderSchema = z.object({
   folderPath: z.string().min(1, "folderPath is required"),
 });
@@ -81,6 +88,11 @@ const cancelJobSchema = z.object({
 });
 
 const activeRuns = new Map<string, ConversionRun>();
+let activeVideoEncoderPlan: VideoEncoderPlan = {
+  name: "libx264",
+  mode: "cpu",
+  args: ["-c:v", "libx264", "-preset", "medium", "-crf", "20"],
+};
 
 const app = express();
 app.use(cors({ origin: APP_ORIGIN }));
@@ -288,12 +300,7 @@ async function runConvertJob(job: RuntimeJob): Promise<void> {
     "0:v:0",
     "-map",
     `0:${job.audioStreamIndex}`,
-    "-c:v",
-    "libx264",
-    "-preset",
-    "medium",
-    "-crf",
-    "20",
+    ...activeVideoEncoderPlan.args,
     "-vf",
     `subtitles=${escapeSubtitlesPath(job.inputFile)}:si=${job.subtitleFilterIndex}`,
     "-c:a",
@@ -308,11 +315,11 @@ async function runConvertJob(job: RuntimeJob): Promise<void> {
 
   try {
     job.status = "running";
-    job.message = "Running";
+    job.message = `Running (${activeVideoEncoderPlan.mode.toUpperCase()}: ${activeVideoEncoderPlan.name})`;
     await runCommandWithProgress("ffmpeg", args, job.durationSeconds, (progress, pid) => {
       job.progress = progress;
       job.processPid = pid;
-      job.message = "Running";
+      job.message = `Running (${activeVideoEncoderPlan.mode.toUpperCase()}: ${activeVideoEncoderPlan.name})`;
     });
 
     if (job.cancelled) {
@@ -337,6 +344,46 @@ async function runConvertJob(job: RuntimeJob): Promise<void> {
     job.status = "failed";
     job.message = error instanceof Error ? error.message : "ffmpeg failed";
   }
+}
+
+function getCpuEncoderPlan(): VideoEncoderPlan {
+  return {
+    name: "libx264",
+    mode: "cpu",
+    args: ["-c:v", "libx264", "-preset", "medium", "-crf", "20"],
+  };
+}
+
+function getGpuEncoderPlan(encoderName: string): VideoEncoderPlan {
+  if (encoderName === "h264_videotoolbox") {
+    return {
+      name: encoderName,
+      mode: "gpu",
+      args: ["-c:v", encoderName, "-b:v", "6000k", "-maxrate", "8000k", "-bufsize", "12000k"],
+    };
+  }
+  if (encoderName === "h264_nvenc") {
+    return {
+      name: encoderName,
+      mode: "gpu",
+      args: ["-c:v", encoderName, "-preset", "p5", "-cq", "23", "-b:v", "0"],
+    };
+  }
+  if (encoderName === "h264_qsv") {
+    return {
+      name: encoderName,
+      mode: "gpu",
+      args: ["-c:v", encoderName, "-global_quality", "24"],
+    };
+  }
+  if (encoderName === "h264_amf") {
+    return {
+      name: encoderName,
+      mode: "gpu",
+      args: ["-c:v", encoderName, "-quality", "quality", "-rc", "vbr_peak", "-b:v", "6000k"],
+    };
+  }
+  return getCpuEncoderPlan();
 }
 
 async function runWithConcurrency<T>(
@@ -417,6 +464,61 @@ function runCommand(command: string, args: string[]): Promise<void> {
       reject(new Error(stderr || `${command} exited with code ${code}`));
     });
   });
+}
+
+function runCommandCapture(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args);
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout || stderr);
+        return;
+      }
+      reject(new Error(stderr || stdout || `${command} exited with code ${code}`));
+    });
+  });
+}
+
+async function detectVideoEncoderPlan(): Promise<VideoEncoderPlan> {
+  const mode = VIDEO_ENCODER_MODE;
+  if (mode === "cpu") {
+    return getCpuEncoderPlan();
+  }
+
+  const encoderOutput = await runCommandCapture("ffmpeg", ["-hide_banner", "-encoders"]);
+  const preferredGpuEncoders = ["h264_videotoolbox", "h264_nvenc", "h264_qsv", "h264_amf"];
+  const availableGpuEncoder = preferredGpuEncoders.find((name) =>
+    encoderOutput.includes(` ${name}`),
+  );
+
+  if (mode === "gpu") {
+    if (!availableGpuEncoder) {
+      throw new Error(
+        "VIDEO_ENCODER_MODE=gpu was requested but no supported GPU H.264 encoder was found.",
+      );
+    }
+    return getGpuEncoderPlan(availableGpuEncoder);
+  }
+
+  if (mode !== "auto") {
+    throw new Error(`Invalid VIDEO_ENCODER_MODE="${VIDEO_ENCODER_MODE}". Use auto, gpu, or cpu.`);
+  }
+
+  if (availableGpuEncoder) {
+    return getGpuEncoderPlan(availableGpuEncoder);
+  }
+
+  return getCpuEncoderPlan();
 }
 
 function runCommandWithProgress(
@@ -509,6 +611,10 @@ function escapeSubtitlesPath(filePath: string): string {
 async function verifyBinaries() {
   await runCommand("ffmpeg", ["-version"]);
   await runCommand("ffprobe", ["-version"]);
+  activeVideoEncoderPlan = await detectVideoEncoderPlan();
+  console.log(
+    `Video encoder mode: ${activeVideoEncoderPlan.mode.toUpperCase()} (${activeVideoEncoderPlan.name})`,
+  );
 }
 
 verifyBinaries()
