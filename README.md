@@ -31,6 +31,15 @@ npm run dev
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:8787`
 
+### One-click start (macOS)
+
+Double-click `start-ui.command` from Finder.
+
+It will:
+- install dependencies if needed
+- start frontend + backend
+- open your browser to `http://localhost:5173` when ready
+
 ## How to Use
 
 1. Paste absolute folder path containing `.mkv` files.
