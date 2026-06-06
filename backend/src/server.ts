@@ -29,7 +29,7 @@ type ConvertJob = {
   inputFile: string;
   outputFile: string;
   audioStreamIndex: number;
-  subtitleStreamIndex: number;
+  subtitleStreamIndex?: number;
 };
 
 type JobStatus = "queued" | "running" | "success" | "failed" | "cancelled";
@@ -46,7 +46,7 @@ type JobResult = {
 type RuntimeJob = ConvertJob &
   JobResult & {
     durationSeconds: number;
-    subtitleFilterIndex: number;
+    subtitleFilterIndex?: number;
     cancelled: boolean;
     processPid?: number;
   };
@@ -76,7 +76,7 @@ const convertSchema = z.object({
         inputFile: z.string().min(1),
         outputFile: z.string().min(1),
         audioStreamIndex: z.number().int().nonnegative(),
-        subtitleStreamIndex: z.number().int().nonnegative(),
+        subtitleStreamIndex: z.number().int().nonnegative().optional(),
       }),
     )
     .min(1),
@@ -242,29 +242,33 @@ async function prepareJobBeforeRun(job: ConvertJob, index: number): Promise<Runt
   const audio = streams.find(
     (stream: any) => stream.index === job.audioStreamIndex && stream.codec_type === "audio",
   );
-  const subtitle = streams.find(
-    (stream: any) => stream.index === job.subtitleStreamIndex && stream.codec_type === "subtitle",
-  );
-
   if (!audio) {
     throw new Error(`Audio stream ${job.audioStreamIndex} not found in ${job.inputFile}`);
   }
-  if (!subtitle) {
-    throw new Error(`Subtitle stream ${job.subtitleStreamIndex} not found in ${job.inputFile}`);
-  }
 
-  const subtitleCodec = subtitle.codec_name;
-  if (!SUPPORTED_SUBTITLE_CODECS.has(subtitleCodec)) {
-    throw new Error(
-      `Subtitle codec "${subtitleCodec}" in ${job.inputFile} is not supported for burn-in.`,
+  let subtitleFilterIndex: number | undefined;
+  if (job.subtitleStreamIndex !== undefined) {
+    const subtitle = streams.find(
+      (stream: any) =>
+        stream.index === job.subtitleStreamIndex && stream.codec_type === "subtitle",
     );
-  }
+    if (!subtitle) {
+      throw new Error(`Subtitle stream ${job.subtitleStreamIndex} not found in ${job.inputFile}`);
+    }
 
-  const subtitleFilterIndex = streams
-    .filter((stream: any) => stream.codec_type === "subtitle")
-    .findIndex((stream: any) => Number(stream.index) === job.subtitleStreamIndex);
-  if (subtitleFilterIndex === -1) {
-    throw new Error(`Subtitle stream ${job.subtitleStreamIndex} not found in ${job.inputFile}`);
+    const subtitleCodec = subtitle.codec_name;
+    if (!SUPPORTED_SUBTITLE_CODECS.has(subtitleCodec)) {
+      throw new Error(
+        `Subtitle codec "${subtitleCodec}" in ${job.inputFile} is not supported for burn-in.`,
+      );
+    }
+
+    subtitleFilterIndex = streams
+      .filter((stream: any) => stream.codec_type === "subtitle")
+      .findIndex((stream: any) => Number(stream.index) === job.subtitleStreamIndex);
+    if (subtitleFilterIndex === -1) {
+      throw new Error(`Subtitle stream ${job.subtitleStreamIndex} not found in ${job.inputFile}`);
+    }
   }
 
   const durationSeconds = Number(probe.format?.duration ?? 0);
@@ -301,8 +305,9 @@ async function runConvertJob(job: RuntimeJob): Promise<void> {
     "-map",
     `0:${job.audioStreamIndex}`,
     ...activeVideoEncoderPlan.args,
-    "-vf",
-    `subtitles=${escapeSubtitlesPath(job.inputFile)}:si=${job.subtitleFilterIndex}`,
+    ...(job.subtitleFilterIndex !== undefined
+      ? ["-vf", `subtitles=${escapeSubtitlesPath(job.inputFile)}:si=${job.subtitleFilterIndex}`]
+      : []),
     "-c:a",
     "aac",
     "-b:a",

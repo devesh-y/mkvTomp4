@@ -123,18 +123,17 @@ function App() {
     try {
       const jobs = files.map((file) => {
         const selection = selections[file.inputFile];
-        if (
-          selection?.audioStreamIndex === undefined ||
-          selection?.subtitleStreamIndex === undefined
-        ) {
-          throw new Error(`Choose both audio and subtitle for ${file.fileName}`);
+        if (selection?.audioStreamIndex === undefined) {
+          throw new Error(`Choose audio for ${file.fileName}`);
         }
 
         return {
           inputFile: file.inputFile,
           outputFile: buildOutputPath(file.inputFile),
           audioStreamIndex: selection.audioStreamIndex,
-          subtitleStreamIndex: selection.subtitleStreamIndex,
+          ...(selection.subtitleStreamIndex !== undefined
+            ? { subtitleStreamIndex: selection.subtitleStreamIndex }
+            : {}),
         };
       });
 
@@ -382,11 +381,15 @@ function App() {
                               ...prev,
                               [file.inputFile]: {
                                 ...prev[file.inputFile],
-                                subtitleStreamIndex: Number(event.target.value),
+                                subtitleStreamIndex:
+                                  event.target.value === ""
+                                    ? undefined
+                                    : Number(event.target.value),
                               },
                             }));
                           }}
                         >
+                          <option value="">None</option>
                           {subtitleStreams.map((stream) => (
                             <option key={stream.index} value={stream.index}>
                               #{stream.index} {stream.language ?? "und"} {stream.codecName ?? ""}
